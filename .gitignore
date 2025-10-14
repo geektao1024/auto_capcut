@@ -13,12 +13,19 @@ __pycache__/
 # 系统文件
 .DS_Store
 Thumbs.db
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
 
 # IDE文件
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
 
 # 音频文件（通常较大）
 *.mp3
@@ -26,10 +33,35 @@ Thumbs.db
 *.mp4
 *.avi
 *.mov
+*.flac
+*.m4a
 
 # 临时文件
 *.tmp
 *.temp
+*.bak
+*.backup
 
 # Claude数据
 .claude/
+
+# 重复文件（copy、副本等）
+* copy*
+* 副本*
+*.bak
+*.backup
+
+# 大型素材文件（根据需要可调整）
+*.psd
+*.ai
+*.sketch
+
+# 环境变量文件
+.env
+.env.local
+.env.*.local
+
+# 测试文件
+test_*
+*_test.*
+tests/
