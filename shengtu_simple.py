@@ -31,18 +31,45 @@ class Config:
     # 等待时间（秒）
     PAGE_LOAD_WAIT = 5      # 页面加载等待
     NAVIGATION_WAIT = 3     # 导航后等待
-    SUBMIT_WAIT = 1         # 提交后等待
-    INPUT_WAIT = 1          # 输入后等待
+    SUBMIT_WAIT = 3         # 提交后等待（增加到3秒，确保提交完成）
+    INPUT_WAIT = 2          # 输入后等待（增加到2秒，确保输入稳定）
+    STATUS_CHECK_WAIT = 3   # 状态检查等待（新增）
     
     # 参考图支持的格式
     REFERENCE_EXTS = [".png", ".jpg", ".jpeg", ".webp", ".bmp"]
+    
+    # 参考图清理方式
+    USE_DOM_CLEAR = True         # 使用DOM方式清理（推荐，无闪烁）
+    SIMPLE_MODE = False          # 简单模式：不删除参考图（会累积）
 
-# 配置日志
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+# 配置日志（同时输出到控制台和文件）
+log_dir = Path.cwd() / "logs"
+log_dir.mkdir(exist_ok=True)
+
+from datetime import datetime
+log_file = log_dir / f"shengtu_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+
+# 创建logger
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+# 控制台handler
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)
+console_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+console_handler.setFormatter(console_formatter)
+
+# 文件handler
+file_handler = logging.FileHandler(log_file, encoding='utf-8')
+file_handler.setLevel(logging.DEBUG)  # 文件记录更详细的日志
+file_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+file_handler.setFormatter(file_formatter)
+
+# 添加handlers
+logger.addHandler(console_handler)
+logger.addHandler(file_handler)
+
+logger.info(f"日志文件: {log_file}")
 
 # ====================================================================
 # 🛠️ 工具函数
@@ -454,10 +481,24 @@ def parse_storyboards(file_path):
 
             # 读取数据行
             row_count = 0
+            skipped_rows = []  # 记录跳过的行
+            
             for row in csv_reader:
                 row_count += 1
+                
+                # 跳过空行
+                if not row or (len(row) == 1 and not row[0].strip()):
+                    logger.debug(f"CSV第 {row_count} 行为空行，跳过")
+                    continue
+                
                 if len(row) >= 2:
                     shot_num = row[0].strip()
+                    
+                    # 验证分镜编号是否为数字
+                    if not shot_num.isdigit():
+                        logger.warning(f"CSV第 {row_count} 行分镜编号无效: '{shot_num}'，跳过")
+                        skipped_rows.append((row_count, f"编号无效: {shot_num}"))
+                        continue
 
                     # 处理多列情况：找到包含实际内容的列
                     content_parts = []
@@ -475,21 +516,33 @@ def parse_storyboards(file_path):
                         # 合并所有内容列
                         content = '\n'.join(content_parts)
 
-                        # 验证内容有效性
-                        if content and len(content.strip()) > 10:  # 至少10个字符
+                        # 验证内容有效性（降低门槛从10到5个字符）
+                        if content and len(content.strip()) > 5:
                             storyboards.append(content)
                             preview = content[:80] + "..." if len(content) > 80 else content
-                            logger.info(f"解析CSV分镜 #{shot_num}: {len(content)} 字符")
+                            logger.info(f"✅ 解析CSV分镜 #{shot_num}: {len(content)} 字符")
                             logger.debug(f"   内容预览: {preview}")
                         else:
-                            logger.warning(f"CSV第 {row_count} 行内容过短或无效，跳过")
+                            logger.warning(f"❌ CSV第 {row_count} 行（分镜#{shot_num}）内容过短: {len(content.strip())} 字符，跳过")
+                            logger.warning(f"   内容: '{content[:50]}'")
+                            skipped_rows.append((row_count, f"内容过短（{len(content.strip())}字符）"))
                     else:
-                        logger.warning(f"CSV第 {row_count} 行没有有效内容，跳过")
+                        logger.warning(f"❌ CSV第 {row_count} 行（分镜#{shot_num}）没有有效内容，跳过")
+                        skipped_rows.append((row_count, "无有效内容"))
                 else:
                     if row:  # 如果不是空行
-                        logger.warning(f"CSV第 {row_count} 行格式不正确，列数: {len(row)}，内容: {row[:50]}，跳过")
+                        logger.warning(f"❌ CSV第 {row_count} 行格式不正确，列数: {len(row)}，内容: {row[:2]}，跳过")
+                        skipped_rows.append((row_count, f"列数不足（{len(row)}列）"))
 
-            logger.info(f"✅ 共解析出 {len(storyboards)} 个分镜")
+            # 显示统计信息
+            logger.info(f"{'='*60}")
+            logger.info(f"✅ CSV解析完成: 共解析出 {len(storyboards)} 个分镜")
+            if skipped_rows:
+                logger.warning(f"⚠️ 跳过了 {len(skipped_rows)} 行:")
+                for row_num, reason in skipped_rows:
+                    logger.warning(f"   - 第 {row_num} 行: {reason}")
+            logger.info(f"{'='*60}")
+            
             return storyboards
 
         # TXT格式处理（CSV、TSV或故事格式）
@@ -673,6 +726,10 @@ class JimengGenerator:
         self.playwright = None
         self.browser = None
         self.page = None
+        
+        # 性能统计
+        self.dom_clear_success_count = 0  # DOM清除成功次数
+        self.dom_clear_fail_count = 0      # DOM清除失败次数（回退到刷新）
     
     async def init_browser(self):
         """初始化浏览器（持久化上下文，保留登录状态）"""
@@ -818,27 +875,148 @@ class JimengGenerator:
             logger.error(f"导航失败: {e}")
             return False
     
-    async def clear_reference_images(self):
+    async def dom_clear_references(self):
         """
-        清空之前上传的参考图
-        注意：由于页面刷新机制，通常不需要手动清除
+        使用DOM方式清除参考图 - 直接操作DOM，无UI交互，无闪烁
+        
+        Returns:
+            bool: 是否成功清除
         """
         try:
-            logger.info("   🧹 检查是否需要清空参考图...")
+            logger.info("   🧹 使用DOM方式清除参考图...")
             
-            # 检查是否有已上传的参考图
-            reference_items = await self.page.query_selector_all('div.reference-item-OOc16S')
+            # 可能的参考图容器选择器（按优先级排序）
+            reference_selectors = [
+                'div.reference-item-OOc16S',  # 原有选择器
+                'div[class*="reference-item"]',  # 模糊匹配
+                'div[class*="image-item"]',
+                'div[class*="reference"]',
+                '.uploaded-image',
+                '[class*="upload-item"]',
+                '[class*="image-upload"]'
+            ]
             
-            if reference_items:
-                logger.info(f"   ℹ️ 检测到 {len(reference_items)} 张参考图（页面刷新后会自动清空）")
+            # 使用JavaScript查找并删除参考图元素（更安全的方式）
+            clear_script = """
+            (selectors) => {
+                let deletedCount = 0;
+                let totalFound = 0;
+                
+                // 遍历所有可能的选择器
+                for (const selector of selectors) {
+                    try {
+                        const elements = document.querySelectorAll(selector);
+                        if (elements && elements.length > 0) {
+                            // 过滤掉包含input[type="file"]的元素（不删除上传控件）
+                            const validElements = Array.from(elements).filter(el => {
+                                // 检查元素本身或子元素是否包含文件上传输入框
+                                const hasFileInput = el.matches('input[type="file"]') || 
+                                                    el.querySelector('input[type="file"]');
+                                return !hasFileInput;  // 只保留不包含上传控件的元素
+                            });
+                            
+                            totalFound = validElements.length;
+                            
+                            if (totalFound === 0) {
+                                continue;  // 没有有效元素，尝试下一个选择器
+                            }
+                            
+                            // 删除过滤后的元素
+                            validElements.forEach(el => {
+                                try {
+                                    // 优先尝试触发删除按钮（保持平台状态同步）
+                                    const deleteBtn = el.querySelector('[class*="delete"], [class*="remove"], [class*="close"], [aria-label*="删除"]');
+                                    if (deleteBtn && typeof deleteBtn.click === 'function') {
+                                        deleteBtn.click();
+                                        deletedCount++;
+                                    } else {
+                                        // 直接删除DOM元素
+                                        el.remove();
+                                        deletedCount++;
+                                    }
+                                } catch (err) {
+                                    console.log('删除元素失败:', err);
+                                }
+                            });
+                            
+                            // 如果找到了元素就停止继续尝试其他选择器
+                            if (totalFound > 0) {
+                                break;
+                            }
+                        }
+                    } catch (err) {
+                        console.log('选择器查询失败:', selector, err);
+                    }
+                }
+                
+                return { deletedCount, totalFound };
+            }
+            """
+            
+            # 执行清除脚本
+            result = await self.page.evaluate(clear_script, reference_selectors)
+            
+            deleted_count = result.get('deletedCount', 0)
+            total_found = result.get('totalFound', 0)
+            
+            if total_found == 0:
+                logger.info("   ℹ️ 没有检测到参考图，无需清除")
+                return True
+            
+            if deleted_count > 0:
+                logger.info(f"   ✅ DOM清除成功：删除了 {deleted_count}/{total_found} 张参考图")
+                
+                # 等待DOM更新和页面稳定（增加等待时间）
+                await asyncio.sleep(0.5)
+                
+                # 验证是否全部清除
+                if deleted_count == total_found:
+                    return True
+                else:
+                    logger.warning(f"   ⚠️ 部分清除成功，仍有 {total_found - deleted_count} 张未删除")
+                    return False
             else:
-                logger.info("   ℹ️ 没有需要清除的参考图")
+                logger.warning(f"   ⚠️ DOM清除失败，未能删除参考图")
+                return False
+                
+        except Exception as e:
+            logger.error(f"   ❌ DOM清除参考图失败: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+            return False
+    
+    async def clear_reference_images(self):
+        """
+        清空参考图 - DOM方案（无闪烁，稳定）
+        
+        Returns:
+            bool: 是否成功清除
+        """
+        try:
+            # 简单模式：不主动删除，直接返回成功（让上传覆盖）
+            if Config.SIMPLE_MODE:
+                logger.info("   ℹ️ 简单模式：跳过清除，稍后上传会自动覆盖")
+                return True
             
-            return True
+            # 使用DOM方式清除
+            if Config.USE_DOM_CLEAR:
+                success = await self.dom_clear_references()
+                if success:
+                    logger.info("   ✅ 参考图清除完成（DOM方式）⚡")
+                    return True
+                else:
+                    logger.warning("   ⚠️ DOM清除未完全成功")
+                    return False
+            else:
+                # 回退到页面刷新方式
+                logger.info("   ℹ️ DOM清除已禁用，将使用页面刷新方式")
+                return False
             
         except Exception as e:
-            logger.debug(f"   检查参考图时出错: {e}")
-            return True  # 不影响后续流程
+            logger.error(f"   ❌ 清除参考图时出错: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+            return False
     
     async def upload_reference_images(self, image_paths):
         """上传参考图 - 使用更可靠的方法"""
@@ -977,16 +1155,19 @@ class JimengGenerator:
             return False
     
     async def check_submit_status(self):
-        """检查提交后的状态 - 优化版（避免误判和重复提交）"""
+        """检查提交后的状态 - 增强版（避免误判导致遗漏分镜）"""
         try:
-            # 等待2秒让toast出现
-            await asyncio.sleep(2)
+            # 等待更长时间让toast和状态变化出现
+            await asyncio.sleep(Config.STATUS_CHECK_WAIT)
 
             # 负面关键词（明确的失败）
-            negative_keywords = ["失败", "错误", "违规", "稍后再试", "频繁", "异常", "提交失败", "生成失败"]
+            negative_keywords = ["失败", "错误", "违规", "稍后再试", "频繁", "异常", "提交失败", "生成失败", "请求失败"]
             # 正面关键词（明确的成功）
-            positive_keywords = ["生成中", "排队", "已提交", "已加入", "开始生成", "成功", "提交成功"]
+            positive_keywords = ["生成中", "排队", "已提交", "已加入", "开始生成", "成功", "提交成功", "已接收"]
 
+            found_status = False  # 是否找到明确状态
+            success_indicators = 0  # 成功指标计数
+            
             # 检查toast提示
             toast_selectors = [
                 '.semi-toast-content-text',
@@ -1011,16 +1192,17 @@ class JimengGenerator:
                                 text = text.strip()
                                 if text and len(text) > 1:
                                     logger.info(f"   📢 页面提示: {text}")
+                                    found_status = True
 
-                                    # 检查负面关键词 - 明确失败才返回False
+                                    # 检查负面关键词 - 明确失败
                                     if any(keyword in text for keyword in negative_keywords):
                                         logger.error(f"   ❌ 检测到错误提示: {text}")
                                         return False
 
-                                    # 检查正面关键词 - 明确成功返回True
+                                    # 检查正面关键词 - 明确成功
                                     if any(keyword in text for keyword in positive_keywords):
                                         logger.info(f"   ✅ 检测到成功提示: {text}")
-                                        return True
+                                        success_indicators += 1
                         except:
                             continue
                 except:
@@ -1041,7 +1223,7 @@ class JimengGenerator:
                             '排队中' in button_text or
                             '处理中' in button_text):
                             logger.info(f"   ✅ 按钮状态变化，推断提交成功: {button_text}")
-                            return True
+                            success_indicators += 1
                     except:
                         continue
 
@@ -1052,7 +1234,7 @@ class JimengGenerator:
                         current_value = await textarea.input_value()
                         if not current_value or len(current_value.strip()) == 0:
                             logger.info(f"   ✅ 输入框已清空，推断提交成功")
-                            return True
+                            success_indicators += 1
                     except:
                         continue
 
@@ -1071,21 +1253,35 @@ class JimengGenerator:
                         for element in elements:
                             if await element.is_visible():
                                 logger.info(f"   ✅ 检测到加载指示器，推断提交成功")
-                                return True
+                                success_indicators += 1
+                                break
                     except:
                         continue
 
             except Exception as e:
                 logger.debug(f"   检查页面状态时出错: {e}")
 
-            # 最后：如果什么都检测不到，保守地认为成功（避免重复提交）
-            logger.warning(f"   ⚠️ 未检测到明确的提交状态")
-            logger.info(f"   💡 默认认为提交成功（避免重复提交）")
-            return True
+            # 综合判断
+            if success_indicators >= 1:
+                logger.info(f"   ✅ 提交成功（成功指标数: {success_indicators}）")
+                return True
+            elif found_status:
+                # 找到了状态但不是成功指标，可能有问题
+                logger.warning(f"   ⚠️ 检测到状态信息但无明确成功指标，建议人工检查")
+                logger.warning(f"   💡 为安全起见，将此次提交标记为失败，可稍后重试")
+                return False
+            else:
+                # 完全没检测到任何状态变化，可能是网络延迟或页面问题
+                logger.warning(f"   ⚠️ 未检测到任何提交状态变化！")
+                logger.warning(f"   💡 可能原因：1) 页面响应慢 2) 提交未真正执行 3) 页面元素变化")
+                logger.warning(f"   💡 为避免遗漏，将此次提交标记为失败，需要重试")
+                return False
 
         except Exception as e:
-            logger.debug(f"   检查提交状态失败: {e}")
-            return True  # 默认认为成功
+            logger.error(f"   ❌ 检查提交状态时发生异常: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+            return False  # 出错时标记为失败，避免遗漏
     
     async def submit(self):
         """点击提交按钮 - 完善的提交逻辑"""
@@ -1270,7 +1466,28 @@ class JimengGenerator:
                     logger.debug("   页面加载超时，继续处理")
 
                 # 1. 清空之前的参考图
-                await self.clear_reference_images()
+                clear_success = await self.clear_reference_images()
+                
+                # 如果清除失败且不是简单模式，使用刷新页面的方式
+                if not clear_success and not Config.SIMPLE_MODE:
+                    self.dom_clear_fail_count += 1
+                    logger.warning("   ⚠️ DOM清除失败，尝试刷新页面...")
+                    try:
+                        await self.page.reload(wait_until="domcontentloaded")
+                        await asyncio.sleep(2)
+                        # 重新检查页面状态
+                        nav_success = await self.navigate()
+                        if nav_success:
+                            logger.info("   ✅ 页面刷新成功，参考图已清空")
+                        else:
+                            logger.warning("   ⚠️ 页面刷新后导航失败，继续尝试")
+                    except Exception as refresh_err:
+                        logger.warning(f"   ⚠️ 刷新页面失败: {refresh_err}，继续尝试")
+                elif clear_success and not Config.SIMPLE_MODE:
+                    self.dom_clear_success_count += 1
+                    # DOM清除成功后，等待页面稳定
+                    await asyncio.sleep(0.3)
+                # 简单模式下不计入统计
 
                 # 2. 上传参考图
                 if image_paths:
@@ -1280,6 +1497,8 @@ class JimengGenerator:
                         logger.warning("   ⚠️ 参考图上传有问题，但继续处理")
                     else:
                         logger.info(f"   ✅ 参考图上传完成")
+                else:
+                    logger.info("   ℹ️ 本次分镜无需上传参考图")
 
                 # 3. 输入分镜内容
                 logger.info(f"   📝 输入分镜内容...")
@@ -1310,19 +1529,19 @@ class JimengGenerator:
                 # 提交成功
                 print(f"✅ [{index}/{total}] 分镜处理完成！")
 
-                # 5. 如果不是最后一个，重新导航准备下一个
+                # 5. 如果不是最后一个，准备下一个分镜
                 if index < total:
                     logger.info("   🔄 准备处理下一个分镜...")
-                    await asyncio.sleep(3)  # 增加等待时间让页面稳定
-                    success = await self.navigate()
-                    if not success:
-                        logger.warning("   ⚠️ 重新导航失败，但继续尝试处理")
-                        # 尝试手动刷新页面
-                        try:
-                            await self.page.reload(wait_until="domcontentloaded")
-                            await asyncio.sleep(2)
-                        except:
-                            pass
+                    
+                    if Config.SIMPLE_MODE:
+                        # 简单模式：等待页面稳定即可，不刷新
+                        await asyncio.sleep(2)
+                        logger.info("   ✅ 准备完成（简单模式：无需刷新）")
+                    else:
+                        # 非简单模式：可能需要重新导航
+                        # 但这个逻辑会在下一个分镜开始时处理
+                        await asyncio.sleep(2)
+                        logger.info("   ✅ 准备完成，将直接处理下一个分镜")
 
                 return True
 
@@ -1429,6 +1648,16 @@ async def main():
     """主流程"""
     print(f"\n{'='*70}")
     print("🎯 即梦图片生成脚本 - 简化版")
+    print(f"{'='*70}")
+    
+    # 显示运行模式
+    if Config.SIMPLE_MODE:
+        print("⚡ 运行模式: 简单模式（不清除参考图，会累积）")
+    elif Config.USE_DOM_CLEAR:
+        print("⚡ 运行模式: DOM清除模式（推荐，无闪烁）")
+    else:
+        print("⚡ 运行模式: 标准模式（页面刷新清除参考图）")
+    
     print(f"{'='*70}\n")
     
     # 1. 选择分镜脚本文件
@@ -1485,10 +1714,13 @@ async def main():
         
         success_count = 0
         failed_indices = []
+        processed_details = []  # 详细处理记录
         
         # 遍历选中的分镜，但显示原始编号
         for i, storyboard in enumerate(selected_storyboards):
             actual_index = start_index + i  # 实际的分镜编号
+            process_start_time = datetime.now()
+            
             try:
                 # 显示: [实际编号/总数]
                 success = await generator.process_one_storyboard(
@@ -1496,13 +1728,35 @@ async def main():
                     actual_index,  # 显示实际编号
                     end_index      # 显示结束编号
                 )
+                
+                process_time = (datetime.now() - process_start_time).total_seconds()
+                
                 if success:
                     success_count += 1
+                    processed_details.append({
+                        'index': actual_index,
+                        'status': '✅ 成功',
+                        'time': f"{process_time:.1f}秒"
+                    })
+                    logger.info(f"✅ 分镜 #{actual_index} 处理成功（耗时: {process_time:.1f}秒）")
                 else:
                     failed_indices.append(actual_index)
+                    processed_details.append({
+                        'index': actual_index,
+                        'status': '❌ 失败',
+                        'time': f"{process_time:.1f}秒"
+                    })
+                    logger.error(f"❌ 分镜 #{actual_index} 处理失败（耗时: {process_time:.1f}秒）")
+                    
             except Exception as e:
+                process_time = (datetime.now() - process_start_time).total_seconds()
                 logger.error(f"❌ 处理第 {actual_index} 个分镜时出错: {e}")
                 failed_indices.append(actual_index)
+                processed_details.append({
+                    'index': actual_index,
+                    'status': f'❌ 异常: {str(e)[:30]}',
+                    'time': f"{process_time:.1f}秒"
+                })
         
         # 7. 显示最终结果
         print(f"\n{'='*70}")
@@ -1510,11 +1764,47 @@ async def main():
         print(f"{'='*70}")
         print(f"✅ 成功: {success_count}/{len(selected_storyboards)}")
         print(f"❌ 失败: {len(failed_indices)}/{len(selected_storyboards)}")
+        print(f"📊 成功率: {success_count/len(selected_storyboards)*100:.1f}%")
+        
+        # 显示性能统计（仅非简单模式）
+        if not Config.SIMPLE_MODE and Config.USE_DOM_CLEAR:
+            total_clear_attempts = generator.dom_clear_success_count + generator.dom_clear_fail_count
+            if total_clear_attempts > 0:
+                dom_clear_rate = generator.dom_clear_success_count / total_clear_attempts * 100
+                print(f"\n⚡ 性能优化统计:")
+                print(f"   DOM清除成功: {generator.dom_clear_success_count}/{total_clear_attempts} ({dom_clear_rate:.1f}%)")
+                print(f"   回退到刷新: {generator.dom_clear_fail_count}/{total_clear_attempts}")
+                if dom_clear_rate > 0:
+                    # 估算节省的时间（假设刷新页面需要3-5秒，DOM清除需要0.3秒）
+                    saved_time = generator.dom_clear_success_count * 3  # 每次节省约3秒
+                    print(f"   估算节省时间: ~{saved_time:.0f}秒 ({saved_time/60:.1f}分钟)")
+        elif Config.SIMPLE_MODE:
+            print(f"\n⚡ 运行模式: 简单模式（不清除参考图）")
         
         if failed_indices:
-            print(f"\n失败的分镜序号: {', '.join(map(str, failed_indices))}")
+            print(f"\n⚠️ 失败的分镜序号: {', '.join(map(str, failed_indices))}")
+            print(f"💡 提示: 可以使用模式2或3重新提交失败的分镜")
+        
+        # 显示详细处理记录
+        print(f"\n📝 详细处理记录:")
+        for detail in processed_details:
+            print(f"   分镜 #{detail['index']}: {detail['status']} ({detail['time']})")
         
         print(f"{'='*70}\n")
+        
+        # 记录到日志文件
+        logger.info("="*60)
+        logger.info("批量处理完成统计:")
+        logger.info(f"成功: {success_count}/{len(selected_storyboards)}")
+        logger.info(f"失败: {len(failed_indices)}/{len(selected_storyboards)}")
+        if not Config.SIMPLE_MODE and Config.USE_DOM_CLEAR:
+            total_clear_attempts = generator.dom_clear_success_count + generator.dom_clear_fail_count
+            if total_clear_attempts > 0:
+                dom_clear_rate = generator.dom_clear_success_count / total_clear_attempts * 100
+                logger.info(f"DOM清除成功率: {dom_clear_rate:.1f}%")
+        if failed_indices:
+            logger.warning(f"失败的分镜: {failed_indices}")
+        logger.info("="*60)
         
         # 询问是否继续提交其他分镜
         while True:
@@ -1542,22 +1832,46 @@ async def main():
                     
                     success_count = 0
                     failed_indices = []
+                    processed_details = []
                     
                     for i, storyboard in enumerate(selected_storyboards):
                         actual_index = start_index + i
+                        process_start_time = datetime.now()
+                        
                         try:
                             success = await generator.process_one_storyboard(
                                 storyboard, 
                                 actual_index,
                                 end_index
                             )
+                            
+                            process_time = (datetime.now() - process_start_time).total_seconds()
+                            
                             if success:
                                 success_count += 1
+                                processed_details.append({
+                                    'index': actual_index,
+                                    'status': '✅ 成功',
+                                    'time': f"{process_time:.1f}秒"
+                                })
+                                logger.info(f"✅ 分镜 #{actual_index} 处理成功（耗时: {process_time:.1f}秒）")
                             else:
                                 failed_indices.append(actual_index)
+                                processed_details.append({
+                                    'index': actual_index,
+                                    'status': '❌ 失败',
+                                    'time': f"{process_time:.1f}秒"
+                                })
+                                logger.error(f"❌ 分镜 #{actual_index} 处理失败（耗时: {process_time:.1f}秒）")
                         except Exception as e:
+                            process_time = (datetime.now() - process_start_time).total_seconds()
                             logger.error(f"❌ 处理第 {actual_index} 个分镜时出错: {e}")
                             failed_indices.append(actual_index)
+                            processed_details.append({
+                                'index': actual_index,
+                                'status': f'❌ 异常: {str(e)[:30]}',
+                                'time': f"{process_time:.1f}秒"
+                            })
                     
                     # 显示结果
                     print(f"\n{'='*70}")
@@ -1565,11 +1879,46 @@ async def main():
                     print(f"{'='*70}")
                     print(f"✅ 成功: {success_count}/{len(selected_storyboards)}")
                     print(f"❌ 失败: {len(failed_indices)}/{len(selected_storyboards)}")
+                    print(f"📊 成功率: {success_count/len(selected_storyboards)*100:.1f}%")
+                    
+                    # 显示性能统计（仅非简单模式）
+                    if not Config.SIMPLE_MODE and Config.USE_DOM_CLEAR:
+                        total_clear_attempts = generator.dom_clear_success_count + generator.dom_clear_fail_count
+                        if total_clear_attempts > 0:
+                            dom_clear_rate = generator.dom_clear_success_count / total_clear_attempts * 100
+                            print(f"\n⚡ 性能优化统计:")
+                            print(f"   DOM清除成功: {generator.dom_clear_success_count}/{total_clear_attempts} ({dom_clear_rate:.1f}%)")
+                            print(f"   回退到刷新: {generator.dom_clear_fail_count}/{total_clear_attempts}")
+                            if dom_clear_rate > 0:
+                                saved_time = generator.dom_clear_success_count * 3
+                                print(f"   估算节省时间: ~{saved_time:.0f}秒 ({saved_time/60:.1f}分钟)")
+                    elif Config.SIMPLE_MODE:
+                        print(f"\n⚡ 运行模式: 简单模式（不清除参考图）")
                     
                     if failed_indices:
-                        print(f"\n失败的分镜序号: {', '.join(map(str, failed_indices))}")
+                        print(f"\n⚠️ 失败的分镜序号: {', '.join(map(str, failed_indices))}")
+                        print(f"💡 提示: 可以使用模式2或3重新提交失败的分镜")
+                    
+                    # 显示详细处理记录
+                    print(f"\n📝 详细处理记录:")
+                    for detail in processed_details:
+                        print(f"   分镜 #{detail['index']}: {detail['status']} ({detail['time']})")
                     
                     print(f"{'='*70}\n")
+                    
+                    # 记录到日志
+                    logger.info("="*60)
+                    logger.info("批量处理完成统计:")
+                    logger.info(f"成功: {success_count}/{len(selected_storyboards)}")
+                    logger.info(f"失败: {len(failed_indices)}/{len(selected_storyboards)}")
+                    if not Config.SIMPLE_MODE and Config.USE_DOM_CLEAR:
+                        total_clear_attempts = generator.dom_clear_success_count + generator.dom_clear_fail_count
+                        if total_clear_attempts > 0:
+                            dom_clear_rate = generator.dom_clear_success_count / total_clear_attempts * 100
+                            logger.info(f"DOM清除成功率: {dom_clear_rate:.1f}%")
+                    if failed_indices:
+                        logger.warning(f"失败的分镜: {failed_indices}")
+                    logger.info("="*60)
                     
                     # 继续循环，再次询问
                     continue

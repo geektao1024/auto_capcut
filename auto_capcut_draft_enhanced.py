@@ -35,6 +35,8 @@ except ImportError:
     print("⚠️  pydub 未安装，音频分段功能将不可用")
     print("   安装命令: pip3 install pydub")
 
+# Whisper字幕功能已移除，建议使用CapCut内置识别
+
 # ============================================================================
 # 配置区域
 # ============================================================================
@@ -72,6 +74,8 @@ SHAKE_INTENSITY = 5.0       # 震动强度（0-10）
 # 背景填充配置
 ENABLE_CANVAS_BLUR = True   # 是否启用背景模糊填充
 CANVAS_BLUR_AMOUNT = 0.375  # 模糊强度（0-1，0.375 = 37.5%）
+
+# 字幕功能已移除 - 请使用CapCut内置"智能字幕"功能
 
 # ============================================================================
 # 日志系统
@@ -252,6 +256,17 @@ def get_template_draft(logger):
     logger.debug(f"使用模板: {template}")
     
     return template_path
+
+
+# ============================================================================
+# 字幕功能已移除 - 请使用CapCut内置"智能字幕"功能
+# ============================================================================
+# 
+# 在CapCut中使用字幕：
+# 1. 打开生成的草稿
+# 2. 点击"文字" → "智能字幕"  
+# 3. 选择语言并识别
+# 4. CapCut会自动生成准确的字幕
 
 
 # ============================================================================
@@ -1029,20 +1044,18 @@ def create_capcut_draft(folder_name, audio_file, image_files, logger):
                     "visible": True,
                     "volume": 1.0
                 }
-                # 按顺序添加所有材料到extra_material_refs（顺序很重要）
+                # 按顺序添加所有材料到extra_material_refs（固定8个，顺序很重要）
                 if default_material_index < len(default_materials_list):
                     mats = default_materials_list[default_material_index]
                     # 1. Speed
                     segment["extra_material_refs"].append(mats["speed_id"])
                     # 2. Placeholder
                     segment["extra_material_refs"].append(mats["placeholder_id"])
-                    # 3. Canvas Blur (如果启用)
+                    # 3. Canvas (如果启用背景模糊)
                     if ENABLE_CANVAS_BLUR and canvas_blur_index < len(canvas_blur_ids):
                         segment["extra_material_refs"].append(canvas_blur_ids[canvas_blur_index])
                         canvas_blur_index += 1
-                    # 4. Shake Effect (如果启用)
-                    if shake_effect_id:
-                        segment["extra_material_refs"].append(shake_effect_id)
+                    # 4. Material Animation (空，保留位置)
                     # 5. Sound Channel
                     segment["extra_material_refs"].append(mats["sound_channel_id"])
                     # 6. Color
@@ -1117,7 +1130,7 @@ def create_capcut_draft(folder_name, audio_file, image_files, logger):
                     "visible": True,
                     "volume": 1.0
                 }
-                # 按顺序添加所有材料到extra_material_refs（第一张图片）
+                # 按顺序添加所有材料到extra_material_refs（第一张图片，固定8个）
                 if default_material_index < len(default_materials_list):
                     mats = default_materials_list[default_material_index]
                     first_segment["extra_material_refs"].append(mats["speed_id"])
@@ -1125,8 +1138,7 @@ def create_capcut_draft(folder_name, audio_file, image_files, logger):
                     if ENABLE_CANVAS_BLUR and canvas_blur_index < len(canvas_blur_ids):
                         first_segment["extra_material_refs"].append(canvas_blur_ids[canvas_blur_index])
                         canvas_blur_index += 1
-                    if shake_effect_id:
-                        first_segment["extra_material_refs"].append(shake_effect_id)
+                    # Material Animation (空，保留位置)
                     first_segment["extra_material_refs"].append(mats["sound_channel_id"])
                     first_segment["extra_material_refs"].append(mats["color_id"])
                     first_segment["extra_material_refs"].append(mats["loudness_id"])
@@ -1182,7 +1194,7 @@ def create_capcut_draft(folder_name, audio_file, image_files, logger):
                     "visible": True,
                     "volume": 1.0
                 }
-                # 按顺序添加所有材料到extra_material_refs（第二张图片）
+                # 按顺序添加所有材料到extra_material_refs（第二张图片，固定8个）
                 if default_material_index < len(default_materials_list):
                     mats = default_materials_list[default_material_index]
                     second_segment["extra_material_refs"].append(mats["speed_id"])
@@ -1190,8 +1202,7 @@ def create_capcut_draft(folder_name, audio_file, image_files, logger):
                     if ENABLE_CANVAS_BLUR and canvas_blur_index < len(canvas_blur_ids):
                         second_segment["extra_material_refs"].append(canvas_blur_ids[canvas_blur_index])
                         canvas_blur_index += 1
-                    if shake_effect_id:
-                        second_segment["extra_material_refs"].append(shake_effect_id)
+                    # Material Animation (空，保留位置)
                     second_segment["extra_material_refs"].append(mats["sound_channel_id"])
                     second_segment["extra_material_refs"].append(mats["color_id"])
                     second_segment["extra_material_refs"].append(mats["loudness_id"])
@@ -1254,7 +1265,7 @@ def create_capcut_draft(folder_name, audio_file, image_files, logger):
                     "visible": True,
                     "volume": 1.0
                 }
-                # 按顺序添加所有材料到extra_material_refs（剩余一张图片）
+                # 按顺序添加所有材料到extra_material_refs（剩余一张图片，固定8个）
                 if default_material_index < len(default_materials_list):
                     mats = default_materials_list[default_material_index]
                     segment["extra_material_refs"].append(mats["speed_id"])
@@ -1262,8 +1273,7 @@ def create_capcut_draft(folder_name, audio_file, image_files, logger):
                     if ENABLE_CANVAS_BLUR and canvas_blur_index < len(canvas_blur_ids):
                         segment["extra_material_refs"].append(canvas_blur_ids[canvas_blur_index])
                         canvas_blur_index += 1
-                    if shake_effect_id:
-                        segment["extra_material_refs"].append(shake_effect_id)
+                    # Material Animation (空，保留位置)
                     segment["extra_material_refs"].append(mats["sound_channel_id"])
                     segment["extra_material_refs"].append(mats["color_id"])
                     segment["extra_material_refs"].append(mats["loudness_id"])
@@ -1334,6 +1344,11 @@ def create_capcut_draft(folder_name, audio_file, image_files, logger):
     }
     draft['tracks'].append(audio_track)
     logger.debug(f"主音频轨道: {len(audio_segments_json)} 个片段")
+    
+    # ============================================================================
+    # 字幕功能已移除 - 请在CapCut中使用"智能字幕"功能
+    # ============================================================================
+    logger.info(f"\n📝 字幕提示: 在CapCut中点击「文字」→「智能字幕」自动识别")
     
     # 创建音效轨道（如果有开头音效）
     if intro_sound_id:
@@ -1433,6 +1448,8 @@ def create_capcut_draft(folder_name, audio_file, image_files, logger):
         draft['tracks'].append(effect_track)
         logger.info(f"✅ 特效轨道已创建（震动覆盖整个视频：{total_duration_sec:.2f}秒）")
     
+    # 字幕功能已移除
+    
     # 保存草稿
     logger.debug("保存草稿文件...")
     with open(draft_info_path, 'w', encoding='utf-8') as f:
@@ -1459,6 +1476,7 @@ def create_capcut_draft(folder_name, audio_file, image_files, logger):
         logger.info(f"🎨 画面特效: 震动 (整个片段持续)")
     if ENABLE_CANVAS_BLUR:
         logger.info(f"🖼️  背景模糊: 已启用 (模糊度={CANVAS_BLUR_AMOUNT*100:.1f}%)")
+    logger.info(f"📝 字幕功能: 请在CapCut中使用「智能字幕」")
     logger.info(f"📦 素材库: {len(local_materials)} 个素材（显示在左侧）")
     logger.info(f"📝 日志文件: {logger.handlers[0].baseFilename}")
     
@@ -1473,16 +1491,16 @@ def main():
     """主程序入口"""
     
     print("\n" + "="*70)
-    print("🎬 CapCut 草稿自动生成器 - 增强版 v2.12")
+    print("🎬 CapCut 草稿自动生成器 - 增强版 v3.2.0")
     print("   ✨ 音频智能分段（优化算法）")
     print("   ✨ 智能图片分配（对齐音频）")
-    print(f"   ✨ 音频增益: +{AUDIO_VOLUME_DB}dB")
-    print(f"   ✨ 播放速度: {AUDIO_SPEED}x")
+    print(f"   ✨ 音频增益: +{AUDIO_VOLUME_DB}dB | 速度: {AUDIO_SPEED}x")
     print(f"   📱 画布比例: {CANVAS_RATIO} (竖屏)")
     if ENABLE_SHAKE_EFFECT:
-        print(f"   🎨 画面特效: 震动（整个片段）")
+        print(f"   🎨 画面特效: 震动（强度{SHAKE_INTENSITY:.0f}/速度{SHAKE_SPEED:.0f}）")
     if ENABLE_CANVAS_BLUR:
         print(f"   🖼️  背景模糊: {CANVAS_BLUR_AMOUNT*100:.1f}% 填充")
+    print(f"   📝 字幕功能: 请在CapCut中使用「智能字幕」")
     print("   ⚡ 一键启动: 所有选项支持默认值（直接回车）")
     print("="*70)
     print(f"素材目录: {MATERIAL_BASE_FOLDER}")

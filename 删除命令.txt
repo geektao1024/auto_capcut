@@ -1,0 +1,14 @@
+## 复制以下命令到终端执行
+
+# 步骤1：卸载whisper包
+pip3 uninstall -y openai-whisper
+
+# 步骤2：删除模型缓存（释放空间）
+rm -rf ~/.cache/whisper
+
+# 步骤3：验证删除
+ls -lh ~/.cache/whisper 2>/dev/null || echo "✅ 缓存已删除"
+
+# 完成！
+echo "✅ Whisper已完全移除"
+
